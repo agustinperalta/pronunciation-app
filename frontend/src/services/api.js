@@ -1,7 +1,12 @@
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 function userKey() {
-  return localStorage.getItem('pronounce_user_key') || ''
+  let key = localStorage.getItem('pronounce_user_key')
+  if (!key) {
+    key = crypto.randomUUID()
+    localStorage.setItem('pronounce_user_key', key)
+  }
+  return key
 }
 
 async function request(path, options = {}) {
