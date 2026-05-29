@@ -10,6 +10,7 @@ export function useSpeech() {
   const [timeLeft, setTimeLeft] = useState(0)
 
   const stopRef = useRef(false)
+  const jumpToRef = useRef(null)
   const startTimeRef = useRef(null)
   const timerRef = useRef(null)
 
@@ -46,6 +47,7 @@ export function useSpeech() {
   const startLoop = useCallback(async ({ words, durationMinutes, pauseSeconds, voice }) => {
     if (!words || words.length === 0) return
     stopRef.current = false
+    jumpToRef.current = null
     setIsPlaying(true)
     setProgress(0)
     setCurrentIndex(0)
@@ -63,6 +65,11 @@ export function useSpeech() {
 
     let idx = 0
     while (!stopRef.current) {
+      if (jumpToRef.current !== null) {
+        idx = jumpToRef.current
+        jumpToRef.current = null
+      }
+
       const elapsed = Date.now() - startTimeRef.current
       if (elapsed >= totalMs) break
 
@@ -75,7 +82,7 @@ export function useSpeech() {
       await new Promise(r => {
         const t = setTimeout(r, pauseSeconds * 1000)
         const check = setInterval(() => {
-          if (stopRef.current) { clearTimeout(t); clearInterval(check); r() }
+          if (stopRef.current || jumpToRef.current !== null) { clearTimeout(t); clearInterval(check); r() }
         }, 100)
         setTimeout(() => clearInterval(check), pauseSeconds * 1000 + 200)
       })
@@ -100,10 +107,19 @@ export function useSpeech() {
     setTimeLeft(0)
   }, [])
 
+  const jumpTo = useCallback((index) => {
+    jumpToRef.current = index
+    window.speechSynthesis.cancel()
+  }, [])
+
+  const speakOnce = useCallback((word) => {
+    speak(word, selectedVoice)
+  }, [speak, selectedVoice])
+
   return {
     voices, selectedVoice, setSelectedVoice,
     isPlaying, currentWord, currentIndex,
     progress, timeLeft,
-    startLoop, stopLoop,
+    startLoop, stopLoop, jumpTo, speakOnce,
   }
 }

@@ -1,6 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { api } from '../services/api'
 import { useSpeech } from '../hooks/useSpeech'
+import { useUser } from '../hooks/useUser'
+import { getPhonetic } from '../services/phonetics'
+import { AccessCodeModal } from './AccessCodeModal'
 
 function formatMs(ms) {
   const s = Math.ceil(ms / 1000)
@@ -14,20 +17,40 @@ export function Trainer({ list, onListUpdate }) {
   const [duration, setDuration] = useState(5)
   const [pause, setPause] = useState(1.5)
   const [shuffle, setShuffle] = useState(false)
+  const [currentPhonetic, setCurrentPhonetic] = useState(null)
+  const [showCodeModal, setShowCodeModal] = useState(false)
+
+  const { userKey, status, refresh: refreshUser } = useUser()
 
   const {
     voices, selectedVoice, setSelectedVoice,
     isPlaying, currentWord, currentIndex,
     progress, timeLeft,
-    startLoop, stopLoop,
+    startLoop, stopLoop, jumpTo, speakOnce,
   } = useSpeech()
 
+  useEffect(() => {
+    if (!currentWord) { setCurrentPhonetic(null); return }
+    setCurrentPhonetic(null)
+    getPhonetic(currentWord).then(setCurrentPhonetic)
+  }, [currentWord])
+
+  const handleChipClick = (word, index) => {
+    if (isPlaying) {
+      jumpTo(index)
+    } else {
+      speakOnce(word)
+    }
+  }
+
   const addWord = async () => {
-    const parts = newWord.split(/[\s,;]+/).filter(Boolean)
-    if (!parts.length) return
+    const entries = newWord.split(/[,;]+/).map(s => s.trim()).filter(Boolean)
+    if (!entries.length) return
     let updated = list
-    for (const w of parts) {
-      try { updated = await api.addWord(list.id, w) } catch (e) { /* skip dup */ }
+    for (const entry of entries) {
+      const wordCount = entry.split(/\s+/).filter(Boolean).length
+      if (wordCount === 0 || wordCount > 2) continue
+      try { updated = await api.addWord(list.id, entry) } catch (e) { /* skip dup */ }
     }
     onListUpdate(updated)
     setNewWord('')
@@ -39,14 +62,26 @@ export function Trainer({ list, onListUpdate }) {
     onListUpdate(updated)
   }
 
-  const toggle = () => {
+  const toggle = async () => {
     if (isPlaying) {
       stopLoop()
-    } else {
-      let words = [...list.words]
-      if (shuffle) words = words.sort(() => Math.random() - 0.5)
-      startLoop({ words, durationMinutes: duration, pauseSeconds: pause, voice: selectedVoice })
+      return
     }
+    const result = await api.startLoop(userKey)
+    if (!result.allowed) {
+      setShowCodeModal(true)
+      return
+    }
+    refreshUser()
+    let words = [...list.words]
+    if (shuffle) words = words.sort(() => Math.random() - 0.5)
+    startLoop({ words, durationMinutes: duration, pauseSeconds: pause, voice: selectedVoice })
+  }
+
+  const loopsBadge = () => {
+    if (status.is_unlimited) return 'Acceso ilimitado'
+    if (status.loops_remaining === 0) return '0 loops restantes'
+    return `${status.loops_remaining} loops gratuitos restantes`
   }
 
   return (
@@ -62,7 +97,7 @@ export function Trainer({ list, onListUpdate }) {
           value={newWord}
           onChange={e => setNewWord(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && addWord()}
-          placeholder="Agregar palabra(s), separadas por coma..."
+          placeholder="Agregar palabra o frase (máx. 2 palabras), separar con coma..."
           className="input-main"
           disabled={isPlaying}
         />
@@ -78,11 +113,12 @@ export function Trainer({ list, onListUpdate }) {
           <div
             key={w}
             className={`chip ${currentWord === w && isPlaying ? 'chip-active' : ''}`}
+            onClick={() => handleChipClick(w, i)}
           >
             {currentWord === w && isPlaying && <span className="chip-dot" />}
             {w}
             {!isPlaying && (
-              <button className="chip-remove" onClick={() => removeWord(w)}>×</button>
+              <button className="chip-remove" onClick={e => { e.stopPropagation(); removeWord(w) }}>×</button>
             )}
           </div>
         ))}
@@ -133,6 +169,18 @@ export function Trainer({ list, onListUpdate }) {
       >
         {isPlaying ? '⏹ Detener' : '▶ Iniciar pronunciación'}
       </button>
+      <div className={`loops-badge ${status.is_unlimited ? 'loops-unlimited' : status.loops_remaining === 0 ? 'loops-empty' : ''}`}>
+        {loopsBadge()}
+      </div>
+
+      {/* Speaking display */}
+      {isPlaying && currentWord && (
+        <div className="speaking-display">
+          <div className="speaking-label-top">Suena como</div>
+          <div className="speaking-word">{currentPhonetic || currentWord}</div>
+          {currentPhonetic && <div className="speaking-original">{currentWord}</div>}
+        </div>
+      )}
 
       {/* Progress */}
       {isPlaying && (
@@ -141,10 +189,18 @@ export function Trainer({ list, onListUpdate }) {
             <div className="progress-fill" style={{ width: `${progress}%` }} />
           </div>
           <div className="progress-meta">
-            <span className="now-word">🔊 {currentWord}</span>
+            <span className="now-word">{currentWord}</span>
             <span className="time-left">{formatMs(timeLeft)} restante</span>
           </div>
         </div>
+      )}
+
+      {showCodeModal && (
+        <AccessCodeModal
+          userKey={userKey}
+          onSuccess={refreshUser}
+          onClose={() => setShowCodeModal(false)}
+        />
       )}
     </div>
   )
