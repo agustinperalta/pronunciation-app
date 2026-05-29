@@ -47,6 +47,9 @@ def _seed_codes(conn, n: int):
 
 
 def init_db():
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
     with get_db() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS word_lists (
